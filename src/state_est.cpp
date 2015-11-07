@@ -17,10 +17,13 @@
 #include <gazebo_msgs/ModelStates.h>
 #include <nav_msgs/Odometry.h>
 #include <visualization_msgs/Marker.h>
-#include <nav_msgs/OccupancyGrid.h>
 #include <Eigen/Dense>
 #include <boost/math/distributions/normal.hpp> // for normal_distribution
 #include <boost/random.hpp>
+#include <math.h>
+#include <algorithm>    // std::lower_bound, std::upper_bound, std::sort
+#include <vector>       // std::vector
+#include <iterator>
 
 using namespace Eigen;
 using namespace std;
@@ -29,11 +32,67 @@ using boost::math::normal; // typedef provides default type is double.
 ros::Publisher pose_publisher;
 ros::Publisher marker_pub;
 
-double ips_x;
-double ips_y;
-double ips_yaw;
+#define PI 3.14159
+#define NUM_PARTICLES 25
+#define STANDARD_DEVIATION 0.2
 
-short sgn(int x) { return x >= 0 ? 1 : -1; }
+double particles[NUM_PARTICLES][3];
+double previous_theta = 0;
+double previous_time = 0;
+
+double ips_x = 0;
+double ips_y = 0;
+double ips_yaw = 0;
+
+// Normal Distribution 
+boost::mt19937 rng; // I don't seed it on purpouse (it's not relevant)
+boost::normal_distribution<> nd(0.0, STANDARD_DEVIATION);
+boost::variate_generator<boost::mt19937&,
+                        boost::normal_distribution<> > var_nor(rng, nd);
+
+void measure_update(double ips_x, double ips_y, double ips_yaw) {
+
+    double re_sampled[NUM_PARTICLES][3];
+    vector<double> weights(NUM_PARTICLES);
+
+    for(int i = 0; i < NUM_PARTICLES; i++) {
+        double prev_weight = i ? weights.at(i - 1) : 0;
+        normal x(particles[i][1], STANDARD_DEVIATION);
+        normal y(particles[i][2], STANDARD_DEVIATION);
+        normal yaw(particles[i][3], STANDARD_DEVIATION);
+        weights.at(i) = boost::math::pdf(x, ips_x) *
+                        boost::math::pdf(y, ips_y) *
+                        boost::math::pdf(yaw, ips_yaw) + prev_weight;
+        //ROS_INFO("prev_weight: %f Weight1: %f Weight2: %f Weight3: %f", prev_weight, boost::math::pdf(x, ips_x), boost::math::pdf(y, ips_y), boost::math::pdf(yaw, ips_yaw));
+
+
+    }
+    //for (int i = 0; i < NUM_PARTICLES; ++i) {
+        //ROS_INFO("Weight: %f POSE: X: %f Y: %f", weights.at(i), particles[i][1], particles[i][2]);
+    //}
+
+    //transform(weights.begin(), weights.end(), weights.begin(),
+              //std::bind1st(std::divides<double>(),weights.at(NUM_PARTICLES - 1)));
+
+    for (int i = 0; i < NUM_PARTICLES; ++i) {
+        weights.at(i) /= weights.at(NUM_PARTICLES - 1);
+        //ROS_INFO("Particle: %d Weight: %f POSE: X: %f Y: %f", i, weights.at(i), particles[i][1], particles[i][2]);
+    }
+    //exit(-1);
+    //ROS_INFO("Actual: POSE: X: %f Y: %f", ips_x, ips_y);
+    //exit(-1);
+    vector<double>::iterator low;
+    for(int i = 0; i < NUM_PARTICLES; i++) {
+        double random_num = (double)((double)(rand() % 10000) / 10000);
+        low = lower_bound(weights.begin(), weights.end(), random_num);
+        int index = (int)(low - weights.begin());
+        //ROS_INFO("Random: %f LOW: %d ", random_num, index);
+        re_sampled[i][1] = particles[index][1];
+        re_sampled[i][2] = particles[index][2];
+        re_sampled[i][3] = particles[index][3];
+    }
+    memcpy(particles, re_sampled, NUM_PARTICLES*3*sizeof(double));
+}
 
 //Callback function for the Position topic (SIMULATION)
 void pose_callback(const gazebo_msgs::ModelStates& msg)
@@ -44,67 +103,57 @@ void pose_callback(const gazebo_msgs::ModelStates& msg)
     ips_x = msg.pose[i].position.x ;
     ips_y = msg.pose[i].position.y ;
     ips_yaw = tf::getYaw(msg.pose[i].orientation);
-    // ROS_INFO("POSE: X: %f Y: %f Yaw: %f",ips_x,ips_y,ips_yaw);
+    if (ips_yaw < 0){
+        ips_yaw += (2 * PI);
+    } else if (particles[i][3] > (2 * PI)) {
+        ips_yaw -= (2 * PI);
+    }
+    //ROS_INFO("POSE: X: %f Y: %f Yaw: %f",ips_x,ips_y,ips_yaw);
+    measure_update(ips_x + var_nor(), ips_y + var_nor(), ips_yaw + var_nor());
+}
+
+void predication_update(double v, double omega, double dt) {
+    //ROS_INFO("V: %f omega: %f dt: %f",v,omega,dt);
+    for(int i = 0; i <  NUM_PARTICLES; i++) {
+        particles[i][1] = particles[i][1] + v * cos(particles[i][3]) * dt + var_nor();
+        particles[i][2] = particles[i][2] + v * sin(particles[i][3]) * dt + var_nor();
+        particles[i][3] = particles[i][3] + omega + var_nor();
+
+        if (particles[i][3] < 0){
+            particles[i][3] += (2 * PI);
+        } else if (particles[i][3] > (2 * PI)) {
+            particles[i][3] -= (2 * PI);
+        }
+    }
 }
 
 void odom_callback(const nav_msgs::Odometry& msg)
-{
-  double v = msg.twist.twist.linear.x;
-  double theta = msg.twist.twist.angular.z;
+{   
+    double stamp = msg.header.stamp.toSec();
+    double dt = stamp - previous_time;
+    //ROS_INFO("prev_time: %f new_tme: %f",previous_time, stamp);
+    previous_time = stamp;
 
-  //TODO: remove y,z and add theta
-
-  if ( v > 0.01 || theta > 0.01 ) {
-    ROS_INFO("ODOMETRY V: %f, Theta: %f",v,theta);
-  }
-
+    double v = msg.twist.twist.linear.x;
+    double theta = msg.twist.twist.angular.z;
+    double omega = theta - previous_theta;
+    previous_theta = theta;
+    //TODO: remove y,z and add theta
+    
+    predication_update(v, omega, dt);
 }
 
-//Callback function for the Position topic (LIVE)
-/*
-void pose_callback(const geometry_msgs::PoseWithCovarianceStamped& msg)
-{
-
-	ips_x X = msg.pose.pose.position.x; // Robot X psotition
-	ips_y Y = msg.pose.pose.position.y; // Robot Y psotition
-	ips_yaw = tf::getYaw(msg.pose.pose.orientation); // Robot Yaw
-	ROS_DEBUG("pose_callback X: %f Y: %f Yaw: %f", X, Y, Yaw);
-}*/
-
-void meas_mod(){
-    Matrix3f A;
-    A <<  1, 0, 0,
-          0, 1, 0,
-          0, 0, 1;
-
-    Matrix3f B;
-    cout << A;
+void init_particles(){
+    for(int i = 0; i < NUM_PARTICLES; i++){
+        particles[i][1] =  (double)((rand() % 100) / 10);
+        particles[i][2] =  (double)((rand() % 100) / 10);
+        particles[i][3] =  (double)((rand() % 628318) / 100000);
+    }
 }
 
 int main(int argc, char **argv)
-{
-    // Normal Distribution Example
-    boost::mt19937 rng; // I don't seed it on purpouse (it's not relevant)
-    boost::normal_distribution<> nd(0.0, 0.1);
-    boost::variate_generator<boost::mt19937&,
-                            boost::normal_distribution<> > var_nor(rng, nd);
-
-    for(int i = 0; i < 10; ++i) {
-        double d = var_nor();
-        cout << "Random = " << d << endl;
-    }
-    // End of Example
-
-    meas_mod();
-    // Eigen Example Code
-    Matrix3d m = Matrix3d::Random();
-    m = (m + Matrix3d::Constant(1.2)) * 50;
-
-    cout << "m =" << endl << m << endl;
-    Vector3d v(1,2,3);
-
-    cout << "m * v =" << endl << m * v << endl;
-    // End of example
+{ 
+    init_particles();
 
 	//Initialize the ROS framework
     ros::init(argc,argv,"main_control");
@@ -124,7 +173,7 @@ int main(int argc, char **argv)
 
     //Set the loop rate
     ros::Rate loop_rate(20);    //20Hz update rate
-	  ROS_INFO("STARTING NODE LOGGING");
+	ROS_INFO("STARTING NODE LOGGING");
 
     while (ros::ok())
     {
@@ -132,10 +181,70 @@ int main(int argc, char **argv)
     	ros::spinOnce();   //Check for new messages
 
     	//Main loop code goes here:
-    	vel.linear.x = 0.1; // set linear speed
+    	vel.linear.x = 1.0; // set linear speed
     	vel.angular.z = 0.3; // set angular speed
 
     	velocity_publisher.publish(vel); // Publish the command velocity
+
+        visualization_msgs::Marker points, actuals;
+        points.header.frame_id = "base_link";
+        points.header.stamp = ros::Time::now();
+        points.ns = "Points";
+        points.action = visualization_msgs::Marker::ADD;
+        points.pose.orientation.w = 1.0;
+
+        points.id = 0;
+
+        points.type = visualization_msgs::Marker::POINTS;
+        // POINTS markers use x and y scale for width/height respectively
+        points.scale.x = 0.2;
+        points.scale.y = 0.2;
+
+        // Points are green
+        points.color.g = 1.0f;
+        points.color.a = 1.0;
+
+        actuals.header.frame_id = "base_link";
+        actuals.header.stamp = ros::Time::now();
+        actuals.ns = "actuals";
+        actuals.action = visualization_msgs::Marker::ADD;
+        actuals.pose.orientation.w = 1.0;
+
+        actuals.id = 1;
+
+        actuals.type = visualization_msgs::Marker::POINTS;
+        // POINTS markers use x and y scale for width/height respectively
+        actuals.scale.x = 0.2;
+        actuals.scale.y = 0.2;
+
+        // Points are green
+        actuals.color.r = 1.0f;
+        actuals.color.a = 1.0;
+
+        geometry_msgs::Point actual_p;
+        actual_p.x = ips_x;
+        actual_p.y = ips_y;
+
+        //ROS_INFO("Particle: %d POSE: X: %f Y: %f", i, p.x, p.y);
+        actual_p.z = 0;
+
+        actuals.points.push_back(actual_p);
+        // Create the vertices for the points and lines
+        for (int i = 0; i < NUM_PARTICLES; ++i) {
+
+          geometry_msgs::Point p;
+          p.x = particles[i][1];
+          p.y = particles[i][2];
+          //ROS_INFO("Particle: %d POSE: X: %f Y: %f", i, p.x, p.y);
+          p.z = 0;
+
+          points.points.push_back(p);
+        }
+
+
+        marker_pub.publish(points);
+        marker_pub.publish(actuals);
+
     }
 
     return 0;
