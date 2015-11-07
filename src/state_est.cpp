@@ -18,7 +18,13 @@
 #include <nav_msgs/Odometry.h>
 #include <visualization_msgs/Marker.h>
 #include <nav_msgs/OccupancyGrid.h>
+#include <Eigen/Dense>
+#include <boost/math/distributions/normal.hpp> // for normal_distribution
+#include <boost/random.hpp>
 
+using namespace Eigen;
+using namespace std;
+using boost::math::normal; // typedef provides default type is double.
 
 ros::Publisher pose_publisher;
 ros::Publisher marker_pub;
@@ -32,7 +38,6 @@ short sgn(int x) { return x >= 0 ? 1 : -1; }
 //Callback function for the Position topic (SIMULATION)
 void pose_callback(const gazebo_msgs::ModelStates& msg)
 {
-
     int i;
     for(i = 0; i < msg.name.size(); i++) if(msg.name[i] == "mobile_base") break;
 
@@ -64,6 +69,28 @@ void pose_callback(const geometry_msgs::PoseWithCovarianceStamped& msg)
 
 int main(int argc, char **argv)
 {
+    // Normal Distribution Example
+    boost::mt19937 rng; // I don't seed it on purpouse (it's not relevant)
+    boost::normal_distribution<> nd(0.0, 0.1);
+    boost::variate_generator<boost::mt19937&, 
+                            boost::normal_distribution<> > var_nor(rng, nd);
+
+    for(int i = 0; i < 10; ++i) {
+        double d = var_nor();
+        cout << "Random = " << d << endl;
+    }
+    // End of Example
+    
+    // Eigen Example Code
+    Matrix3d m = Matrix3d::Random();
+    m = (m + Matrix3d::Constant(1.2)) * 50;
+
+    cout << "m =" << endl << m << endl;
+    Vector3d v(1,2,3);
+  
+    cout << "m * v =" << endl << m * v << endl;
+    // End of example
+
 	//Initialize the ROS framework
     ros::init(argc,argv,"main_control");
     ros::NodeHandle n;
