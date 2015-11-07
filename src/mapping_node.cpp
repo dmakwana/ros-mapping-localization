@@ -27,16 +27,18 @@
 #define COLS 100 //10 meters with resolution of 0.1
 #define CELLS_PER_METER 10
 
-const float g_resolution = 1/CELLS_PER_METER; // meters/cell
+const float g_resolution = (float)1/CELLS_PER_METER; // meters/cell
 #define LOW_PROB 40
 #define MID_PROB 50
 #define HIGH_PROB 60
+#define FULL_PROB 100
 
 // PROTOTYPES
 void bresenham(int x0, int y0, int x1, int y1, std::vector<int>& x, std::vector<int>& y);
 
 // GLOBAL VARIABLES
 nav_msgs::OccupancyGrid grid;
+std::vector<int8_t> myMap;
 geometry_msgs::Pose initial_pose;
 ros::Time map_load_time;
 bool initial_pose_found = false;
@@ -89,9 +91,18 @@ void pose_callback(const geometry_msgs::PoseWithCovarianceStamped& msg)
 	ROS_INFO("pose_callback X: %f Y: %f Yaw: %f", X, Y, Yaw);
 }*/
 
+int8_t get_prob_from_logit(float logit) {
+    float exp_logit = exp(logit);
+    return (int8_t)FULL_PROB*(exp_logit / (1 + exp_logit));
+}
+
+float logit(int prob) {
+    return log(((float)prob/(FULL_PROB-prob)));
+}
+
 //Callback function for the scan
 void scan_callback(const sensor_msgs::LaserScan& msg) {
-    ROS_INFO("scan_callback!");
+    // ROS_INFO("scan_callback!");
     int i = 0, x0 = 0, y0 = 0, x1 = 0, y1 = 0, j = 0, r = 0;
     float angle;
     float actual_angle;
@@ -106,47 +117,59 @@ void scan_callback(const sensor_msgs::LaserScan& msg) {
         // Update cells for where we have data
         // ROS_INFO("sup0 %f, %f", msg.range_min, msg.range_max);
         if (isnan(msg.ranges.at(i)) || msg.ranges.at(i) > msg.range_max || msg.ranges.at(i) < msg.range_min) { continue; }
-        x0 = ips_x - init_ips_x + (COLS-1)/2, y0 = ips_y - init_ips_y + (ROWS-1)/2;
+        x0 = CELLS_PER_METER*(ips_x - init_ips_x) + (COLS-1)/2;
+        y0 = CELLS_PER_METER*(ips_y - init_ips_y) + (ROWS-1)/2;
         x1 = x0 + CELLS_PER_METER * msg.ranges[i] * cos(actual_angle);
         y1 = y0 + CELLS_PER_METER * msg.ranges[i] * sin(actual_angle);
         std::vector<int> x, y;
-        ROS_INFO("INITIAL IPS_YAW: %f", init_ips_yaw*180/PI);
-        ROS_INFO("IPS_YAW: %f", ips_yaw*180/PI);
-        ROS_INFO("PHI: %f", angle*180/PI);
-        ROS_INFO("ACTUAL ANGLE: %f", actual_angle*180/PI);
-        ROS_INFO("RANGE: %f", msg.ranges.at(i));
+        // ROS_INFO("INITIAL IPS_YAW: %f", init_ips_yaw*180/PI);
+        // ROS_INFO("IPS_YAW: %f", ips_yaw*180/PI);
+        // ROS_INFO("PHI: %f", angle*180/PI);
+        // ROS_INFO("ACTUAL ANGLE: %f", actual_angle*180/PI);
+        // ROS_INFO("RANGE: %f", msg.ranges.at(i));
         // ROS_INFO("sup1 %f, %f, %f", cos(actual_angle),sin(actual_angle), (float)msg.ranges.at(i));
         // ROS_INFO("sup2 %d, %d, %d, %d", x0 ,y0, x1, y1);
         // ROS_INFO("sup3 yaw: %f, range: %f, phi %f,", ips_yaw ,msg.ranges.at(i), angle);
         bresenham(x0, y0, x1, y1, x, y);
         // ROS_INFO("sup2");
         // exit(-1);    
-        ROS_INFO("vector_size: %d", (int)x.size());
+        // ROS_INFO("vector_size: %d", (int)x.size());
         for (int j = 0; j < x.size(); j++) {
             // ROS_INFO("HERE2");
             int x_delta = x[j]-x0;
             int y_delta = y[j]-y0;
             r = sqrt(x_delta*x_delta + y_delta*y_delta);
-            ROS_INFO("R: %d", r);
-            ROS_INFO("%d, %d", x[j], y[j]);
-            int old_val = grid.data[y[j]*COLS + x[j]];
-            int probability;
-            if (r < (msg.ranges.at(i) - 2)) { 
-                probability = LOW_PROB;
-                ROS_INFO("LOW_PROB");
+            // ROS_INFO("R: %d", r);
+            // ROS_INFO("msg.range: %f", msg.ranges.at(i));
+            // ROS_INFO("%d, %d", x[j], y[j]);
+            int new_prob;
+            if (r < (msg.ranges.at(i) * 10 - 2)) { 
+                new_prob = LOW_PROB;
+                // ROS_INFO("LOW_PROB");
             } 
             else { 
-                ROS_INFO("HIGH_PROB");
-                probability = HIGH_PROB; 
+                // ROS_INFO("HIGH_PROB");
+                new_prob = HIGH_PROB; 
             }
             // ROS_INFO("HERE");
-            grid.data[y[j]*COLS + x[j]] = log(probability/(1-probability)) + old_val;
-            // ROS_INFO("HERE1");   
+            int old_prob = myMap[y[j]*COLS + x[j]];
+            // if (old_prob != 0) {
+            //     ROS_INFO("NOT ZERO");
+            // } else {
+            //     ROS_INFO("ZERO");
+            //     exit(-1);
+            // }
+            // ROS_INFO("OLD PROB AT %d, %d: %d", x[j], y[j], old_prob);
+            // ROS_INFO("OLD LOGIT: %f, NEW_LOGIT: %f", logit(old_prob), logit(new_prob));
+            // ROS_INFO("UPDATING_PROB: %d", new_prob); 
+            
+            float new_logit = logit(new_prob) + logit(old_prob);
+            myMap[y[j]*COLS + x[j]] = get_prob_from_logit(new_logit);
+            int m = 1 + myMap[y[j]*COLS + x[j]];
+            // ROS_INFO("NEW PROB: %d", m);
         }
-        exit(-1);
     }
-    // exit(-1);
-    ROS_INFO("scan_callback finished!");
+    // ROS_INFO("scan_callback finished!");
     return;
 }
 //Bresenham line algorithm (pass empty vectors)
@@ -189,31 +212,6 @@ void bresenham(int x0, int y0, int x1, int y1, std::vector<int>& x, std::vector<
     }
 }
 
-// void updateGrid(nav_msgs::OccupancyGrid& grid, sensor_msgs::LaserScan& scan) {
-//     int i, x0, y0, x1, y1, j, r;
-//     float angle;
-//     int num_data_points = (int)((scan.angle_max - scan.angle_min)/scan.angle_increment);
-//     for (i = 0; i < num_data_points; i++) {
-//         angle = scan.angle_min + i * scan.angle_increment;
-//         // Update cells for where we have data
-//         if (scan.ranges[i] > scan.range_max || scan.ranges[i] < scan.range_min) { continue; }
-//         x0 = ips_x, y0 = ips_y;
-//         x1 = x1 + scan.ranges[i] * cos(angle - ips_yaw);
-//         y1 = y1 + scan.ranges[i] * sin(angle - ips_yaw);
-//         std::vector<int> x, y;
-//         bresenham(x0, y0, x1, y1, x, y);
-//         for (int j = 0; j < x.size(); j++) {
-//             r = sqrt((x1-x0)*(x1-x0) + (y1-y0)*(y1-y0));
-//             int old_val = grid.data[y[j]*COLS + x[j]];
-//             int probability;
-//             if (r < scan.ranges[i] - 2) { probability = LOW_PROB; } 
-//             else { probability = HIGH_PROB; }
-//             grid.data[y[j]*COLS + x[j]] = log(probability/(1-probability)) + old_val;
-//         }
-//     }
-//     return;
-// }
-
 int main(int argc, char **argv)
 {
 	//Initialize the ROS framework
@@ -236,9 +234,7 @@ int main(int argc, char **argv)
 
     // Occupany Grid Map and MapMetaData variable
     nav_msgs::MapMetaData metadata;
-    metadata.resolution = g_resolution;
-    metadata.width = COLS;
-    metadata.height = ROWS;
+
     ROS_INFO("Waiting for initial pose!");
 
     ros::Rate loop_rate(10);    //20Hz update rate
@@ -251,13 +247,14 @@ int main(int argc, char **argv)
     metadata.origin = initial_pose;
     metadata.map_load_time = ros::Time::now();
     grid.info = metadata;
+    grid.header.frame_id = "base_footprint";
 
     ROS_INFO("Initializing grid cells!");
-
-    // initialize every cell to have a 50% probability to have an object there
-    for (int i = 0; i < ROWS*COLS*CELLS_PER_METER; i++) {
-        grid.data.push_back(MID_PROB);
+    for (int i = 0; i < ROWS*COLS; i++) {
+        myMap.push_back(MID_PROB);
     }
+    grid.data = myMap;
+    grid.header.seq = 0;
     ROS_INFO("Initialized grid cells!");
     //Set the loop rate
 	
@@ -270,11 +267,17 @@ int main(int argc, char **argv)
     	vel.linear.x = 0.1; // set linear speed
     	vel.angular.z = 0.3; // set angular speed
 
-        // UPDATE GRID
-        // updateGrid(grid, g_scan_data);
+        metadata.resolution = g_resolution;
+        metadata.width = COLS;
+        metadata.height = ROWS;
 
-    	velocity_publisher.publish(vel); // Publish the command velocity
+        grid.info = metadata;
+        grid.data = myMap;
+        grid.header.stamp = ros::Time::now();
+
+    	velocity_publisher.publish(vel); // Publish the command velocity     
         map_publisher.publish(grid);
+        grid.header.seq++;
     }
 
     return 0;
