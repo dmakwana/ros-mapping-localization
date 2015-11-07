@@ -107,6 +107,7 @@ include_directories(
 
 ## Declare a cpp executable
  add_executable(mapping_node src/mapping_node.cpp)
+ add_executable(state_est src/state_est.cpp)
 
 ## Add cmake target dependencies of the executable/library
 ## as an example, message headers may need to be generated before nodes
@@ -116,7 +117,9 @@ include_directories(
  target_link_libraries(mapping_node
    ${catkin_LIBRARIES}
  )
-
+ target_link_libraries(state_est
+   ${catkin_LIBRARIES}
+ )
 #############
 ## Install ##
 #############
