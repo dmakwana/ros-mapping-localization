@@ -44,16 +44,18 @@ void pose_callback(const gazebo_msgs::ModelStates& msg)
     ips_x = msg.pose[i].position.x ;
     ips_y = msg.pose[i].position.y ;
     ips_yaw = tf::getYaw(msg.pose[i].orientation);
-    ROS_INFO("POSE: X: %f Y: %f Yaw: %f",ips_x,ips_y,ips_yaw);
+    // ROS_INFO("POSE: X: %f Y: %f Yaw: %f",ips_x,ips_y,ips_yaw);
 }
 
 void odom_callback(const nav_msgs::Odometry& msg)
 {
-  double x = msg.twist.twist.linear.x;
-  double y = msg.twist.twist.linear.y;
-  double z = msg.twist.twist.linear.z;
-  if ( x > 0.01 || y > 0.01 || z > 0.01) {
-    ROS_INFO("ODOMETRY X: %f, Y: %f, Z: %f",x,y,z);
+  double v = msg.twist.twist.linear.x;
+  double theta = msg.twist.twist.angular.z;
+
+  //TODO: remove y,z and add theta
+
+  if ( v > 0.01 || theta > 0.01 ) {
+    ROS_INFO("ODOMETRY V: %f, Theta: %f",v,theta);
   }
 
 }
@@ -69,12 +71,22 @@ void pose_callback(const geometry_msgs::PoseWithCovarianceStamped& msg)
 	ROS_DEBUG("pose_callback X: %f Y: %f Yaw: %f", X, Y, Yaw);
 }*/
 
+void meas_mod(){
+    Matrix3f A;
+    A <<  1, 0, 0,
+          0, 1, 0,
+          0, 0, 1;
+
+    Matrix3f B;
+    cout << A;
+}
+
 int main(int argc, char **argv)
 {
     // Normal Distribution Example
     boost::mt19937 rng; // I don't seed it on purpouse (it's not relevant)
     boost::normal_distribution<> nd(0.0, 0.1);
-    boost::variate_generator<boost::mt19937&, 
+    boost::variate_generator<boost::mt19937&,
                             boost::normal_distribution<> > var_nor(rng, nd);
 
     for(int i = 0; i < 10; ++i) {
@@ -82,14 +94,15 @@ int main(int argc, char **argv)
         cout << "Random = " << d << endl;
     }
     // End of Example
-    
+
+    meas_mod();
     // Eigen Example Code
     Matrix3d m = Matrix3d::Random();
     m = (m + Matrix3d::Constant(1.2)) * 50;
 
     cout << "m =" << endl << m << endl;
     Vector3d v(1,2,3);
-  
+
     cout << "m * v =" << endl << m * v << endl;
     // End of example
 
