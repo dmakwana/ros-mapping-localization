@@ -1,0 +1,12 @@
+- roscore (opens logs and stuff)
+- Start gazebo: roslaunch turtlebot_example turtlebot_gazebo.launch
+- keyboard: roslaunch turtlebot_teleop keyboard_teleop.launch
+- auto move: rostopic pub -r 10 /cmd_vel_mux/input/teleop geometry_msgs/Twist '{linear:  {x: 0.2, y: 0.0, z: 0.0}, angular: {x: 0.0,y: 0.0,z: -0.2}}'
+
+How do you open a map, save a map and configure program to use that map?
+
+rosrun rviz rviz
+
+make new map in gazebo, save it, replace it with the sample world that was given
+- Start gazebo: roslaunch turtlebot_example turtlebot_gazebo.launch
+rviz->add map, topic /map
