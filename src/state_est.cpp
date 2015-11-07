@@ -15,6 +15,7 @@
 #include <geometry_msgs/Twist.h>
 #include <tf/transform_datatypes.h>
 #include <gazebo_msgs/ModelStates.h>
+#include <nav_msgs/Odometry.h>
 #include <visualization_msgs/Marker.h>
 #include <nav_msgs/OccupancyGrid.h>
 
@@ -41,6 +42,15 @@ void pose_callback(const gazebo_msgs::ModelStates& msg)
     ROS_INFO("POSE: X: %f Y: %f Yaw: %f",ips_x,ips_y,ips_yaw);
 }
 
+void odom_callback(const nav_msgs::Odometry& msg)
+{
+  double x = msg.twist.twist.linear.x;
+  double y = msg.twist.twist.linear.y;
+  double z = msg.twist.twist.linear.z;
+
+  ROS_INFO("ODOMETRY X: %f, Y: %f, Z: %f",x,y,z);
+}
+
 //Callback function for the Position topic (LIVE)
 /*
 void pose_callback(const geometry_msgs::PoseWithCovarianceStamped& msg)
@@ -60,6 +70,7 @@ int main(int argc, char **argv)
 
     //Subscribe to the desired topics and assign callbacks
     ros::Subscriber pose_sub = n.subscribe("/gazebo/model_states", 1, pose_callback);
+    ros::Subscriber odom_sub = n.subscribe("/odom", 1, odom_callback);
 
     //Setup topics to Publish from this node
     ros::Publisher velocity_publisher = n.advertise<geometry_msgs::Twist>("/cmd_vel_mux/input/navi", 1);
