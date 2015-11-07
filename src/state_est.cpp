@@ -52,8 +52,10 @@ void odom_callback(const nav_msgs::Odometry& msg)
   double x = msg.twist.twist.linear.x;
   double y = msg.twist.twist.linear.y;
   double z = msg.twist.twist.linear.z;
+  if ( x > 0.01 || y > 0.01 || z > 0.01) {
+    ROS_INFO("ODOMETRY X: %f, Y: %f, Z: %f",x,y,z);
+  }
 
-  ROS_INFO("ODOMETRY X: %f, Y: %f, Z: %f",x,y,z);
 }
 
 //Callback function for the Position topic (LIVE)
