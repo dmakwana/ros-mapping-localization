@@ -20,14 +20,12 @@
 #include <nav_msgs/OccupancyGrid.h>
 #include <sensor_msgs/LaserScan.h>
 #include <vector>
-#include <geometry_msgs/PoseWithCovarianceStamped.h>
 
 // CONFIGURATION VARIABLES
 #define PI 3.14159
 #define ROWS 100 //10 meters with resolution of 0.1
 #define COLS 100 //10 meters with resolution of 0.1
 #define CELLS_PER_METER 10
-#define IPS_TO_METERS 2.2
 
 const float g_resolution = (float)1/CELLS_PER_METER; // meters/cell
 #define LOW_PROB 40
@@ -64,7 +62,7 @@ geometry_msgs::PoseStamped curr_pose_stamped;
 short sgn(int x) { return x >= 0 ? 1 : -1; }
 
 //Callback function for the Position topic (SIMULATION)
-/*void pose_callback(const gazebo_msgs::ModelStates& msg) 
+void pose_callback(const gazebo_msgs::ModelStates& msg) 
 {
     int i;
     for(i = 0; i < msg.name.size(); i++) if(msg.name[i] == "mobile_base") break;
@@ -87,37 +85,17 @@ short sgn(int x) { return x >= 0 ? 1 : -1; }
     curr_pose_stamped.pose.orientation.w = msg.pose[i].orientation.w;
     curr_pose_stamped.header.stamp = ros::Time::now();
     curr_pose_stamped.header.seq++;
-}*/
+}
 
 //Callback function for the Position topic (LIVE)
-
+/*
 void pose_callback(const geometry_msgs::PoseWithCovarianceStamped& msg)
 {
-    ips_x = IPS_TO_METERS*msg.pose.pose.position.x; // Robot X psotition
-    ips_y = IPS_TO_METERS*msg.pose.pose.position.y; // Robot Y psotition
-    ips_yaw = tf::getYaw(msg.pose.pose.orientation); // Robot Yaw
-    if (ips_yaw < 0) {
-        ips_yaw = 2*PI + ips_yaw;
-    }
-    ROS_INFO("pose_callback X: %f Y: %f Yaw: %f", ips_x, ips_y, ips_yaw);
-
-    if (!initial_pose_found) {
-        init_ips_x = ips_x;
-        init_ips_y = ips_y;
-        init_ips_yaw = ips_yaw;
-        initial_pose_found = true;
-    }
-    curr_pose_stamped.pose.position.x = IPS_TO_METERS*msg.pose.pose.position.x;
-    curr_pose_stamped.pose.position.y = IPS_TO_METERS*msg.pose.pose.position.y;
-    curr_pose_stamped.pose.position.z = IPS_TO_METERS*msg.pose.pose.position.z;
-    curr_pose_stamped.pose.orientation.x = msg.pose.pose.orientation.x;
-    curr_pose_stamped.pose.orientation.y = msg.pose.pose.orientation.y;
-    curr_pose_stamped.pose.orientation.z = msg.pose.pose.orientation.z;
-    curr_pose_stamped.pose.orientation.w = msg.pose.pose.orientation.w;
-    curr_pose_stamped.header.stamp = ros::Time::now();
-    curr_pose_stamped.header.seq++;
-
-}
+	ips_x X = msg.pose.pose.position.x; // Robot X psotition
+	ips_y Y = msg.pose.pose.position.y; // Robot Y psotition
+	ips_yaw = tf::getYaw(msg.pose.pose.orientation); // Robot Yaw
+	ROS_INFO("pose_callback X: %f Y: %f Yaw: %f", X, Y, Yaw);
+}*/
 
 int8_t get_prob_from_logit(float logit) {
     float exp_logit = exp(logit);
@@ -140,7 +118,6 @@ void scan_callback(const sensor_msgs::LaserScan& msg) {
             continue; 
         }
         angle = msg.angle_min + i * msg.angle_increment;
-        // actual_angle = ips_yaw + angle;
         actual_angle = ips_yaw + angle;
         x0 = CELLS_PER_METER * (ips_x - init_ips_x) + (COLS-1)/2;
         y0 = CELLS_PER_METER * (ips_y - init_ips_y) + (ROWS-1)/2;
@@ -170,7 +147,7 @@ void scan_callback(const sensor_msgs::LaserScan& msg) {
 //Bresenham line algorithm (pass empty vectors)
 // Usage: (x0, y0) is the first point and (x1, y1) is the second point. The calculated
 //        points (x, y) are stored in the x and y vector. x and y should be empty 
-//   vectors of integers and shold be defined where this function is called from.
+//	  vectors of integers and shold be defined where this function is called from.
 void bresenham(int x0, int y0, int x1, int y1, std::vector<int>& x, std::vector<int>& y) {
 
     int dx = abs(x1 - x0);
@@ -209,13 +186,12 @@ void bresenham(int x0, int y0, int x1, int y1, std::vector<int>& x, std::vector<
 
 int main(int argc, char **argv)
 {
-    //Initialize the ROS framework
+	//Initialize the ROS framework
     ros::init(argc,argv,"main_control");
     ros::NodeHandle n;
 
     //Subscribe to the desired topics and assign callbacks
-    //ros::Subscriber pose_sub = n.subscribe("/gazebo/model_states", 1, pose_callback);
-    ros::Subscriber pose_sub = n.subscribe("/indoor_pos", 1, pose_callback);
+    ros::Subscriber pose_sub = n.subscribe("/gazebo/model_states", 1, pose_callback);
     ros::Subscriber scan_sub = n.subscribe("/scan", 1, scan_callback);
     
     //Setup topics to Publish from this node
@@ -255,15 +231,15 @@ int main(int argc, char **argv)
     grid.header.seq = 0;
     ROS_INFO("Initialized grid cells!");
     //Set the loop rate
-    
+	
     while (ros::ok())
     {
-        loop_rate.sleep(); //Maintain the loop rate
-        ros::spinOnce();   //Check for new messages
+    	loop_rate.sleep(); //Maintain the loop rate
+    	ros::spinOnce();   //Check for new messages
 
-        //Main loop code goes here:
-        vel.linear.x = 0.1; // set linear speed
-        vel.angular.z = 0.3; // set angular speed
+    	//Main loop code goes here:
+    	vel.linear.x = 0.1; // set linear speed
+    	vel.angular.z = 0.3; // set angular speed
 
         metadata.resolution = g_resolution;
         metadata.width = COLS;
@@ -273,7 +249,7 @@ int main(int argc, char **argv)
         grid.data = myMap;
         grid.header.stamp = ros::Time::now();
 
-        velocity_publisher.publish(vel); // Publish the command velocity     
+    	// velocity_publisher.publish(vel); // Publish the command velocity     
         map_publisher.publish(grid);
         pose_publisher.publish(curr_pose_stamped);
         grid.header.seq++;
