@@ -20,12 +20,15 @@
 #include <nav_msgs/OccupancyGrid.h>
 #include <sensor_msgs/LaserScan.h>
 #include <vector>
+#include <geometry_msgs/PoseWithCovarianceStamped.h>
 
 // CONFIGURATION VARIABLES
 #define PI 3.14159
-#define ROWS 100 //10 meters with resolution of 0.1
-#define COLS 100 //10 meters with resolution of 0.1
-#define CELLS_PER_METER 10
+#define ROWS 500 //10 meters with resolution of 0.1
+#define COLS 500 //10 meters with resolution of 0.1
+#define CELLS_PER_METER 50
+#define GRID_OFFSET ROWS/2
+#define IPS_TO_METERS 2.2
 
 const float g_resolution = (float)1/CELLS_PER_METER; // meters/cell
 #define LOW_PROB 40
@@ -33,6 +36,11 @@ const float g_resolution = (float)1/CELLS_PER_METER; // meters/cell
 #define HIGH_PROB 60
 #define FULL_PROB 100
 
+sensor_msgs::LaserScan cachedScanMessage;
+geometry_msgs::PoseWithCovarianceStamped lastPose;
+float x_delta = 0.2;
+float y_delta = 0.2;
+float yaw_delta = 0.3;
 // PROTOTYPES
 void bresenham(int x0, int y0, int x1, int y1, std::vector<int>& x, std::vector<int>& y);
 
@@ -62,7 +70,7 @@ geometry_msgs::PoseStamped curr_pose_stamped;
 short sgn(int x) { return x >= 0 ? 1 : -1; }
 
 //Callback function for the Position topic (SIMULATION)
-void pose_callback(const gazebo_msgs::ModelStates& msg) 
+/*void pose_callback(const gazebo_msgs::ModelStates& msg) 
 {
     int i;
     for(i = 0; i < msg.name.size(); i++) if(msg.name[i] == "mobile_base") break;
@@ -70,7 +78,7 @@ void pose_callback(const gazebo_msgs::ModelStates& msg)
     ips_y = msg.pose[i].position.y ;
     ips_yaw = tf::getYaw(msg.pose[i].orientation);
 
-    if (!initial_pose_found) {
+    if (!initial_pose_found) {  
         init_ips_x = ips_x;
         init_ips_y = ips_y;
         init_ips_yaw = ips_yaw;
@@ -85,17 +93,62 @@ void pose_callback(const gazebo_msgs::ModelStates& msg)
     curr_pose_stamped.pose.orientation.w = msg.pose[i].orientation.w;
     curr_pose_stamped.header.stamp = ros::Time::now();
     curr_pose_stamped.header.seq++;
-}
+}*/
 
 //Callback function for the Position topic (LIVE)
-/*
+
+void updateScan();
+
 void pose_callback(const geometry_msgs::PoseWithCovarianceStamped& msg)
-{
-    ips_x X = msg.pose.pose.position.x; // Robot X psotition
-    ips_y Y = msg.pose.pose.position.y; // Robot Y psotition
-    ips_yaw = tf::getYaw(msg.pose.pose.orientation); // Robot Yaw
-    ROS_INFO("pose_callback X: %f Y: %f Yaw: %f", X, Y, Yaw);
-}*/
+{ 
+    if (!initial_pose_found) {
+        init_ips_x = IPS_TO_METERS*msg.pose.pose.position.x;;
+        init_ips_y = IPS_TO_METERS*msg.pose.pose.position.y;
+        init_ips_yaw = tf::getYaw(msg.pose.pose.orientation);
+        initial_pose_found = true;
+        lastPose = msg;
+    }
+    // float new_yaw = tf::getYaw(lastPose.pose.pose.orientation);
+    // float old_yaw = tf::getYaw(msg.pose.pose.orientation);
+    // if (new_yaw < 0) {
+    //     new_yaw = 2*PI + new_yaw;
+    // }
+    // if (old_yaw < 0) {
+    //     old_yaw = 2*PI + old_yaw;
+    // }
+    // if ((abs(lastPose.pose.pose.position.x - msg.pose.pose.position.x) > x_delta) ||
+    //     (abs(lastPose.pose.pose.position.y - msg.pose.pose.position.y) > y_delta) ||
+    //     (abs(new_yaw - old_yaw) > yaw_delta)) {
+    //     return;
+    // }
+    lastPose = msg;
+    ips_x = IPS_TO_METERS*msg.pose.pose.position.x; // Robot X psotition
+    ips_y = IPS_TO_METERS*msg.pose.pose.position.y; // Robot Y psotition
+    float original_ips_yaw = tf::getYaw(msg.pose.pose.orientation); // Robot Yaw
+    ips_yaw = original_ips_yaw;
+    if (ips_yaw < 0) {
+        ips_yaw = 2*PI + ips_yaw;
+    }
+    // ROS_INFO("pose_callback X: %f Y: %f, Yaw: %f Adjusted Yaw: %f", 
+                // ips_x, ips_y, original_ips_yaw, ips_yaw);
+
+    // if (!initial_pose_found) {
+    //     init_ips_x = ips_x;
+    //     init_ips_y = ips_y;
+    //     init_ips_yaw = ips_yaw;
+    //     initial_pose_found = true;
+    // }
+    curr_pose_stamped.pose.position.x = IPS_TO_METERS*msg.pose.pose.position.x + GRID_OFFSET;
+    curr_pose_stamped.pose.position.y = IPS_TO_METERS*msg.pose.pose.position.y + GRID_OFFSET;
+    curr_pose_stamped.pose.position.z = IPS_TO_METERS*msg.pose.pose.position.z;
+    curr_pose_stamped.pose.orientation.x = msg.pose.pose.orientation.x;
+    curr_pose_stamped.pose.orientation.y = msg.pose.pose.orientation.y;
+    curr_pose_stamped.pose.orientation.z = msg.pose.pose.orientation.z;
+    curr_pose_stamped.pose.orientation.w = msg.pose.pose.orientation.w;
+    curr_pose_stamped.header.stamp = ros::Time::now();
+    curr_pose_stamped.header.seq++;
+    updateScan();
+}
 
 int8_t get_prob_from_logit(float logit) {
     float exp_logit = exp(logit);
@@ -106,23 +159,22 @@ float logit(int prob) {
     return log(((float)prob/(FULL_PROB-prob)));
 }
 
-//Callback function for the scan
-void scan_callback(const sensor_msgs::LaserScan& msg) {
+void updateScan() {
     int i = 0, x0 = 0, y0 = 0, x1 = 0, y1 = 0, j = 0, r = 0;
     float angle, actual_angle;
-    for (i = 0; i < (int)msg.ranges.size(); i++) {
+    for (i = 0; i < (int)cachedScanMessage.ranges.size(); i++) {
         // Update cells only for where we have data
-        if (isnan(msg.ranges.at(i)) || 
-            msg.ranges.at(i) > msg.range_max || 
-            msg.ranges.at(i) < msg.range_min) { 
+        if (isnan(cachedScanMessage.ranges.at(i)) || 
+            cachedScanMessage.ranges.at(i) > cachedScanMessage.range_max || 
+            cachedScanMessage.ranges.at(i) < cachedScanMessage.range_min) { 
             continue; 
         }
-        angle = msg.angle_min + i * msg.angle_increment;
-        actual_angle = ips_yaw + angle;
+        angle = cachedScanMessage.angle_min + i * cachedScanMessage.angle_increment;
+        actual_angle = ips_yaw - angle;
         x0 = CELLS_PER_METER * (ips_x - init_ips_x) + (COLS-1)/2;
         y0 = CELLS_PER_METER * (ips_y - init_ips_y) + (ROWS-1)/2;
-        x1 = x0 + CELLS_PER_METER * msg.ranges[i] * cos(actual_angle);
-        y1 = y0 + CELLS_PER_METER * msg.ranges[i] * sin(actual_angle);
+        x1 = x0 + CELLS_PER_METER * cachedScanMessage.ranges[i] * cos(actual_angle);
+        y1 = y0 + CELLS_PER_METER * cachedScanMessage.ranges[i] * sin(actual_angle);
         std::vector<int> x, y;
         bresenham(x0, y0, x1, y1, x, y);
         for (int j = 0; j < x.size(); j++) {
@@ -130,7 +182,7 @@ void scan_callback(const sensor_msgs::LaserScan& msg) {
             int y_delta = y[j]-y0;
             r = sqrt(x_delta*x_delta + y_delta*y_delta);
             int new_prob;
-            if (r < (msg.ranges.at(i) * CELLS_PER_METER - 2)) { 
+            if (r < (cachedScanMessage.ranges.at(i) * CELLS_PER_METER - 2)) { 
                 new_prob = LOW_PROB;
             } 
             else {
@@ -144,10 +196,15 @@ void scan_callback(const sensor_msgs::LaserScan& msg) {
     }
     return;
 }
+
+//Callback function for the scan
+void scan_callback(const sensor_msgs::LaserScan& msg) {
+    cachedScanMessage = msg;
+}
 //Bresenham line algorithm (pass empty vectors)
 // Usage: (x0, y0) is the first point and (x1, y1) is the second point. The calculated
 //        points (x, y) are stored in the x and y vector. x and y should be empty 
-//    vectors of integers and shold be defined where this function is called from.
+//   vectors of integers and shold be defined where this function is called from.
 void bresenham(int x0, int y0, int x1, int y1, std::vector<int>& x, std::vector<int>& y) {
 
     int dx = abs(x1 - x0);
@@ -191,7 +248,8 @@ int main(int argc, char **argv)
     ros::NodeHandle n;
 
     //Subscribe to the desired topics and assign callbacks
-    ros::Subscriber pose_sub = n.subscribe("/gazebo/model_states", 1, pose_callback);
+    //ros::Subscriber pose_sub = n.subscribe("/gazebo/model_states", 1, pose_callback);
+    ros::Subscriber pose_sub = n.subscribe("/indoor_pos", 1, pose_callback);
     ros::Subscriber scan_sub = n.subscribe("/scan", 1, scan_callback);
     
     //Setup topics to Publish from this node
@@ -238,8 +296,10 @@ int main(int argc, char **argv)
         ros::spinOnce();   //Check for new messages
 
         //Main loop code goes here:
-        vel.linear.x = 0.1; // set linear speed
-        vel.angular.z = 0.3; // set angular speed
+        vel.linear.x = 0.0; // set linear speed
+        // vel.linear.x = 0.1; // set linear speed
+        // vel.angular.z = 0.3; // set angular speed
+        vel.angular.z = 0.0; // set angular speed
 
         metadata.resolution = g_resolution;
         metadata.width = COLS;

@@ -24,9 +24,9 @@
 
 // CONFIGURATION VARIABLES
 #define PI 3.14159
-#define ROWS 100 //10 meters with resolution of 0.1
-#define COLS 100 //10 meters with resolution of 0.1
-#define CELLS_PER_METER 10
+#define ROWS 1000 //10 meters with resolution of 0.1
+#define COLS 1000 //10 meters with resolution of 0.1
+#define CELLS_PER_METER 100
 #define IPS_TO_METERS 2.2
 
 const float g_resolution = (float)1/CELLS_PER_METER; // meters/cell
@@ -72,7 +72,7 @@ short sgn(int x) { return x >= 0 ? 1 : -1; }
     ips_y = msg.pose[i].position.y ;
     ips_yaw = tf::getYaw(msg.pose[i].orientation);
 
-    if (!initial_pose_found) {
+    if (!initial_pose_found) {  
         init_ips_x = ips_x;
         init_ips_y = ips_y;
         init_ips_yaw = ips_yaw;
@@ -142,8 +142,7 @@ void scan_callback(const sensor_msgs::LaserScan& msg) {
             continue; 
         }
         angle = msg.angle_min + i * msg.angle_increment;
-        // actual_angle = ips_yaw + angle;
-        actual_angle = ips_yaw - angle;
+        actual_angle = ips_yaw + angle;
         x0 = CELLS_PER_METER * (ips_x - init_ips_x) + (COLS-1)/2;
         y0 = CELLS_PER_METER * (ips_y - init_ips_y) + (ROWS-1)/2;
         x1 = x0 + CELLS_PER_METER * msg.ranges[i] * cos(actual_angle);

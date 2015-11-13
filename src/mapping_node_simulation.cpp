@@ -23,9 +23,9 @@
 
 // CONFIGURATION VARIABLES
 #define PI 3.14159
-#define ROWS 100 //10 meters with resolution of 0.1
-#define COLS 100 //10 meters with resolution of 0.1
-#define CELLS_PER_METER 10
+#define ROWS 1000 //10 meters with resolution of 0.1
+#define COLS 1000 //10 meters with resolution of 0.1
+#define CELLS_PER_METER 100
 
 const float g_resolution = (float)1/CELLS_PER_METER; // meters/cell
 #define LOW_PROB 40
