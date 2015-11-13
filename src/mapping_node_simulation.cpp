@@ -20,17 +20,25 @@
 #include <nav_msgs/OccupancyGrid.h>
 #include <sensor_msgs/LaserScan.h>
 #include <vector>
+#include <geometry_msgs/PoseWithCovarianceStamped.h>
+
+using std::endl;
+using std::cout;
 
 // CONFIGURATION VARIABLES
 #define PI 3.14159
-#define ROWS 1000 //10 meters with resolution of 0.1
-#define COLS 1000 //10 meters with resolution of 0.1
-#define CELLS_PER_METER 100
-
+#define LENGTH 10 // meters
+#define WIDTH LENGTH // square
+#define CELLS_PER_METER 50
+#define ROWS WIDTH*CELLS_PER_METER //number of rows in terms of cells
+#define COLS LENGTH*CELLS_PER_METER //number of columns in terms of cells
+#define GRID_OFFSET ROWS/2
 const float g_resolution = (float)1/CELLS_PER_METER; // meters/cell
-#define LOW_PROB 40
-#define MID_PROB 50
-#define HIGH_PROB 60
+
+// Probabilities
+#define LOW_PROB 40     // Used if nothing found in grid cell
+#define MID_PROB 50     // Starting probability of finding something in that grid cell
+#define HIGH_PROB 60    // Used to update probability if something found in that grid cell
 #define FULL_PROB 100
 
 // PROTOTYPES
@@ -42,23 +50,13 @@ std::vector<int8_t> myMap;
 geometry_msgs::Pose initial_pose;
 ros::Time map_load_time;
 bool initial_pose_found = false;
-
-// bool new_scan_data = false;
 sensor_msgs::LaserScan g_scan_data;
-
-using std::endl;
-using std::cout;
-
 ros::Publisher pose_publisher;
 ros::Publisher marker_pub;
 
-double init_ips_x;
-double init_ips_y;
-double init_ips_yaw;
-double ips_x;
-double ips_y;
-double ips_yaw;
+double ips_x, ips_y, ips_yaw, init_ips_x, init_ips_y, init_ips_yaw;
 geometry_msgs::PoseStamped curr_pose_stamped;
+
 short sgn(int x) { return x >= 0 ? 1 : -1; }
 
 //Callback function for the Position topic (SIMULATION)
@@ -70,14 +68,14 @@ void pose_callback(const gazebo_msgs::ModelStates& msg)
     ips_y = msg.pose[i].position.y ;
     ips_yaw = tf::getYaw(msg.pose[i].orientation);
 
-    if (!initial_pose_found) {
+    if (!initial_pose_found) {  
         init_ips_x = ips_x;
         init_ips_y = ips_y;
         init_ips_yaw = ips_yaw;
         initial_pose_found = true;
     }
-    curr_pose_stamped.pose.position.x = msg.pose[i].position.x;
-    curr_pose_stamped.pose.position.y = msg.pose[i].position.y;
+    curr_pose_stamped.pose.position.x = msg.pose[i].position.x + GRID_OFFSET;
+    curr_pose_stamped.pose.position.y = msg.pose[i].position.y + GRID_OFFSET;
     curr_pose_stamped.pose.position.z = msg.pose[i].position.z;
     curr_pose_stamped.pose.orientation.x = msg.pose[i].orientation.x;
     curr_pose_stamped.pose.orientation.y = msg.pose[i].orientation.y;
@@ -86,16 +84,6 @@ void pose_callback(const gazebo_msgs::ModelStates& msg)
     curr_pose_stamped.header.stamp = ros::Time::now();
     curr_pose_stamped.header.seq++;
 }
-
-//Callback function for the Position topic (LIVE)
-/*
-void pose_callback(const geometry_msgs::PoseWithCovarianceStamped& msg)
-{
-	ips_x X = msg.pose.pose.position.x; // Robot X psotition
-	ips_y Y = msg.pose.pose.position.y; // Robot Y psotition
-	ips_yaw = tf::getYaw(msg.pose.pose.orientation); // Robot Yaw
-	ROS_INFO("pose_callback X: %f Y: %f Yaw: %f", X, Y, Yaw);
-}*/
 
 int8_t get_prob_from_logit(float logit) {
     float exp_logit = exp(logit);
@@ -111,7 +99,7 @@ void scan_callback(const sensor_msgs::LaserScan& msg) {
     int i = 0, x0 = 0, y0 = 0, x1 = 0, y1 = 0, j = 0, r = 0;
     float angle, actual_angle;
     for (i = 0; i < (int)msg.ranges.size(); i++) {
-        // Update cells only for where we have data
+        // Update cells only for where we have valid data
         if (isnan(msg.ranges.at(i)) || 
             msg.ranges.at(i) > msg.range_max || 
             msg.ranges.at(i) < msg.range_min) { 
@@ -137,7 +125,6 @@ void scan_callback(const sensor_msgs::LaserScan& msg) {
                 new_prob = HIGH_PROB; 
             }
             int old_prob = myMap[y[j]*COLS + x[j]];
-            
             float new_logit = logit(new_prob) + logit(old_prob);
             myMap[y[j]*COLS + x[j]] = get_prob_from_logit(new_logit);
         }
@@ -147,7 +134,7 @@ void scan_callback(const sensor_msgs::LaserScan& msg) {
 //Bresenham line algorithm (pass empty vectors)
 // Usage: (x0, y0) is the first point and (x1, y1) is the second point. The calculated
 //        points (x, y) are stored in the x and y vector. x and y should be empty 
-//	  vectors of integers and shold be defined where this function is called from.
+//   vectors of integers and shold be defined where this function is called from.
 void bresenham(int x0, int y0, int x1, int y1, std::vector<int>& x, std::vector<int>& y) {
 
     int dx = abs(x1 - x0);
@@ -186,7 +173,7 @@ void bresenham(int x0, int y0, int x1, int y1, std::vector<int>& x, std::vector<
 
 int main(int argc, char **argv)
 {
-	//Initialize the ROS framework
+    //Initialize the ROS framework
     ros::init(argc,argv,"main_control");
     ros::NodeHandle n;
 
@@ -209,6 +196,7 @@ int main(int argc, char **argv)
 
     ROS_INFO("Waiting for initial pose!");
 
+    //Set the loop rate
     ros::Rate loop_rate(10);    //20Hz update rate
     while (!initial_pose_found) {
         loop_rate.sleep();
@@ -230,16 +218,15 @@ int main(int argc, char **argv)
     grid.data = myMap;
     grid.header.seq = 0;
     ROS_INFO("Initialized grid cells!");
-    //Set the loop rate
-	
+    
     while (ros::ok())
     {
-    	loop_rate.sleep(); //Maintain the loop rate
-    	ros::spinOnce();   //Check for new messages
+        loop_rate.sleep(); //Maintain the loop rate
+        ros::spinOnce();   //Check for new messages
 
-    	//Main loop code goes here:
-    	vel.linear.x = 0.1; // set linear speed
-    	vel.angular.z = 0.3; // set angular speed
+        //Main loop code goes here:
+        vel.linear.x = 0.1; // set linear speed
+        vel.angular.z = 0.3; // set angular speed
 
         metadata.resolution = g_resolution;
         metadata.width = COLS;
@@ -249,10 +236,13 @@ int main(int argc, char **argv)
         grid.data = myMap;
         grid.header.stamp = ros::Time::now();
 
-    	// velocity_publisher.publish(vel); // Publish the command velocity     
+        // Comment out below line for manual teleop control of the turtlebot
+        // velocity_publisher.publish(vel); // Publish the command velocity     
         map_publisher.publish(grid);
         pose_publisher.publish(curr_pose_stamped);
         grid.header.seq++;
     }
+
     return 0;
 }
+ 
